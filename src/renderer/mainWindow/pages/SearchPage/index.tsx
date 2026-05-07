@@ -12,7 +12,7 @@
  * 状态全部由 jotai store 管理，方便未来前进/后退恢复。
  */
 
-import { useEffect, useCallback, useMemo, useRef } from 'react';
+import { useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router';
 import { useAtomValue, useSetAtom } from 'jotai/react';
@@ -37,6 +37,7 @@ import {
 } from './store';
 import { useSearch } from './useSearch';
 import './index.scss';
+import { RefreshCw } from 'lucide-react';
 
 // ── 组件映射 ──
 
@@ -60,12 +61,15 @@ export default function SearchPage() {
     const setPluginPerType = useSetAtom(activePluginPerTypeAtom);
 
     const { search } = useSearch();
-    const prevQueryRef = useRef('');
 
     // ── query 变化 → 重置状态 & 触发首次搜索 ──
     useEffect(() => {
-        if (!query || query === prevQueryRef.current) return;
-        prevQueryRef.current = query;
+        if (!query) return;
+
+        // 使用 store 中的 searchQueryAtom 判断 query 是否真的变化
+        // 这样即使组件 remount（切换页面再回来），也能正确判断
+        const storedQuery = store.get(searchQueryAtom);
+        if (query === storedQuery) return;
 
         // 重置结果
         resetSearchResults();
@@ -148,6 +152,15 @@ export default function SearchPage() {
                 <h2 className="p-search__title">
                     <span className="p-search__title-keyword">「{query}」</span>
                     {t('search.result_title')}
+                    <button
+                        className="p-search__filters-reset"
+                        onClick={() => {
+                            resetSearchResults();
+                            if (query) search(query, activeType, activePluginHash, true);
+                        }}
+                    >
+                        <RefreshCw size={16} />
+                    </button>
                 </h2>
 
                 <div className="p-search__filters">

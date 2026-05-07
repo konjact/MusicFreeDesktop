@@ -30,8 +30,13 @@ async function fetchPage<T extends SearchMediaType>(
     page: number,
     type: T,
     pluginHash: string,
+    noCache: boolean = false,
 ): Promise<{ success: boolean; isEnd: boolean; dataLen: number }> {
     try {
+        const cachedData = getPluginResult(type, pluginHash);
+        if (!noCache && cachedData && page <= cachedData.page) {
+            return { success: true, isEnd: cachedData.isEnd, dataLen: cachedData.data.length };
+        }
         const result = await pluginManager.callPluginMethod({
             hash: pluginHash,
             method: 'search',
@@ -117,30 +122,52 @@ export function useSearch() {
      * 首次搜索：从第 1 页开始。
      * 会自动 reset 该 slot 然后拉取。
      */
-    const search = useCallback(async (query: string, type: SearchMediaType, pluginHash: string) => {
-        if (!query.trim() || !pluginHash) return;
+    const search = useCallback(
+        async (
+            query: string,
+            type: SearchMediaType,
+            pluginHash: string,
+            noCache: boolean = false,
+        ) => {
+            if (!query.trim() || !pluginHash) return;
 
-        const seq = ++seqRef.current;
+            const seq = ++seqRef.current;
 
-        // 初始化状态
-        setPluginResult(type, pluginHash, {
-            query,
-            page: 1,
-            isEnd: false,
-            status: RequestStatus.Pending,
-            data: [],
-        });
+            let needInit = false;
 
-        const result = await fetchPage(query, 1, type, pluginHash);
+            if (noCache) {
+                // 需要初始化状态
+                needInit = true;
+            } else {
+                const result = getPluginResult(type, pluginHash);
+                // 如果没记录，或者缓存的 query 与当前 query 不一致，则初始化状态
+                if (!result || result.query !== query) {
+                    needInit = true;
+                }
+            }
 
-        // 过期检查（双重保险：fetchPage 自身的 stale guard + 此处的 seq 检查）
-        if (seqRef.current !== seq) return;
+            if (needInit) {
+                setPluginResult(type, pluginHash, {
+                    query,
+                    page: 0,
+                    isEnd: false,
+                    status: RequestStatus.Pending,
+                    data: [],
+                });
+            }
 
-        // 首页无数据且未到底 → 自动续页
-        if (result.success && !result.isEnd && result.dataLen === 0) {
-            await autoContinue(query, 1, type, pluginHash);
-        }
-    }, []);
+            const result = await fetchPage(query, 1, type, pluginHash, noCache);
+
+            // 过期检查（双重保险：fetchPage 自身的 stale guard + 此处的 seq 检查）
+            if (seqRef.current !== seq) return;
+
+            // 首页无数据且未到底 → 自动续页
+            if (result.success && !result.isEnd && result.dataLen === 0) {
+                await autoContinue(query, 1, type, pluginHash);
+            }
+        },
+        [],
+    );
 
     /**
      * 加载更多：在当前 page 基础上 +1。
